@@ -37,7 +37,7 @@ MAX_CHARS = 16           # máximo de letras por pantallazo (para que entre en U
 HOOK_SECONDS = 3.5       # cuánto dura el título de arriba
 CTA_SECONDS = 3.0        # cuánto dura el cierre ("Comentá AMÉN")
 SUB_X = 540              # centro horizontal del subtítulo
-SUB_Y_DEFAULT = 1040     # posición FIJA vertical (1080x1920); ~54 % de la altura
+SUB_Y_DEFAULT = 1420    # posición FIJA vertical (1080x1920); ~74 % de la altura
 WHITE = "&H00F0F8FF&"    # blanco cálido
 AMBER = "&H0000B0FF&"    # palabra activa (ámbar)
 GLOW = "&H001E8CFF&"     # brillo naranja alrededor del texto
@@ -132,9 +132,9 @@ WrapStyle: 0
 
 [V4+ Styles]
 Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
-Style: Sub,Arial,68,&H00FFFFFF,&H00FFFFFF,&H00101010,&H80000000,-1,0,0,0,100,100,0,0,1,3,0,5,60,60,0,1
-Style: Hook,Arial,46,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,4,1,8,90,90,230,1
-Style: Cta,Arial,56,&H0000FFFF,&H0000FFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,5,2,8,90,90,230,1
+Style: Sub,Montserrat ExtraBold,76,&H0000D8FF,&H00FFFFFF,&H00000000,&H96000000,0,0,0,0,100,100,0,0,1,8,3,5,60,60,0,1
+Style: Hook,Montserrat ExtraBold,50,&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,0,0,0,0,100,100,0,0,1,6,2,8,90,90,230,1
+Style: Cta,Montserrat ExtraBold,58,&H0000D8FF,&H0000D8FF,&H00000000,&H96000000,0,0,0,0,100,100,0,0,1,7,3,8,90,90,230,1
 
 [Events]
 Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
@@ -160,7 +160,7 @@ def chunk_words(ws):
 
 
 def build_ass(words, start, end, hook, cta, dur, sub_y=SUB_Y_DEFAULT):
-    """Subtítulos que aparecen con un 'pop', resaltan la palabra activa con brillo y desaparecen.
+    """Subtítulos estilo karaoke: blancos, con contorno grueso, y el amarillo va rellenando las palabras al ritmo de la voz.
     Posición fija: no se mueven de arriba a abajo."""
     clip_words = [w for w in words if w["s"] >= start - 0.05 and w["e"] <= end + 0.3]
     chunks = chunk_words(clip_words)
@@ -178,34 +178,21 @@ def build_ass(words, start, end, hook, cta, dur, sub_y=SUB_Y_DEFAULT):
         )
 
     for ci, chunk in enumerate(chunks):
-        next_start = (chunks[ci + 1][0]["s"] - start) if ci + 1 < len(chunks) else None
+        c_start = max(chunk[0]["s"] - start, 0)
+        c_end = chunk[-1]["e"] - start + 0.12
+        if ci + 1 < len(chunks):
+            c_end = min(c_end, chunks[ci + 1][0]["s"] - start)
+        c_end = max(c_end, c_start + 0.1)
+
+        partes = []
         for j, w in enumerate(chunk):
-            w_start = max(w["s"] - start, 0)
-            if j + 1 < len(chunk):
-                w_end = chunk[j + 1]["s"] - start
-            else:
-                w_end = w["e"] - start + 0.12
-                if next_start is not None:
-                    w_end = min(w_end, next_start)
-            w_end = max(w_end, w_start + 0.05)
-
-            anim = ""
-            first, last = j == 0, j == len(chunk) - 1
-            if first:   # entra con un "pop" rápido
-                anim += "\\fscx82\\fscy82\\t(0,120,\\fscx100\\fscy100)"
-            if first or last:
-                anim += f"\\fad({40 if first else 0},{70 if last else 0})"
-            pos = f"\\an5\\pos({SUB_X},{sub_y})"
-
-            txt = [ass_escape(cw["w"]).upper() for cw in chunk]
-            plain = " ".join(txt)
-            colored = " ".join(
-                f"{{\\c{AMBER if k == j else WHITE}}}{t}" for k, t in enumerate(txt))
-            # capa 0: resplandor naranja difuminado; capa 1: texto nítido
-            ev.append(f"Dialogue: 0,{ass_time(w_start)},{ass_time(w_end)},Sub,,0,0,0,,"
-                      f"{{{pos}{anim}\\bord9\\blur12\\c{GLOW}\\3c{GLOW}}}{plain}")
-            ev.append(f"Dialogue: 1,{ass_time(w_start)},{ass_time(w_end)},Sub,,0,0,0,,"
-                      f"{{{pos}{anim}}}{colored}")
+            t0 = w["s"] - start
+            t1 = (chunks[ci][j + 1]["s"] - start) if j + 1 < len(chunk) else (w["e"] - start)
+            cs = max(int(round((t1 - t0) * 100)), 1)
+            partes.append(f"{{\\kf{cs}}}{ass_escape(w['w']).upper()}")   # \kf: el amarillo avanza dentro de la palabra
+        anim = "\\fscx82\\fscy82\\t(0,120,\\fscx100\\fscy100)\\fad(40,70)"   # entra con un "pop"
+        ev.append(f"Dialogue: 1,{ass_time(c_start)},{ass_time(c_end)},Sub,,0,0,0,,"
+                  f"{{\\an5\\pos({SUB_X},{sub_y})" + anim + "}" + " ".join(partes))
     return ASS_HEADER + "\n".join(ev) + "\n"
 
 
@@ -576,7 +563,7 @@ def cmd_render(args):
     music_vol = g("music_vol", 0.2)
     sfx_vol = g("sfx_vol", 0.35)
     estilo = g("estilo", "cine")
-    sub_y = int(float(g("pos_sub", 0.54)) * 1920)
+    sub_y = int(float(g("pos_sub", 0.74)) * 1920)
     cta_default = g("cta", "COMENTÁ AMÉN Y COMPARTILO")
     logo = str(Path(g("logo")).expanduser().resolve()) if g("logo") else None
     manual_focus = None
@@ -697,8 +684,8 @@ def add_render_options(r):
     r.add_argument("--sfx-vol", type=float, default=0.35, dest="sfx_vol", help="volumen de los efectos de sonido")
     r.add_argument("--zoom", type=float, default=1.35, help="intensidad del zoom (1 = sin zoom)")
     r.add_argument("--foco", help="dónde está la cara, ej: 0.55,0.25 (x,y entre 0 y 1). Si no, se detecta sola")
-    r.add_argument("--pos-sub", type=float, default=0.54, dest="pos_sub",
-                   help="altura de los subtítulos (0 arriba, 1 abajo). Default 0.54 = centro")
+    r.add_argument("--pos-sub", type=float, default=0.74, dest="pos_sub",
+                   help="altura de los subtítulos (0 arriba, 1 abajo). Default 0.74 = tercio inferior")
     r.add_argument("--cta", default="COMENTÁ AMÉN Y COMPARTILO", help="texto final ('' para quitarlo)")
     r.add_argument("--logo", help="imagen PNG con el logo de tu iglesia (marca de agua)")
     r.add_argument("--whoosh", action="store_true", help="agregar sonido 'whoosh' en cada corte de zoom (por defecto NO)")
