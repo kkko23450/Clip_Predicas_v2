@@ -12,3 +12,4 @@ Cuando termines, cerrá el Codespace para no gastar horas.
 
 Respaldo: el disco del Codespace se borra con el Codespace. Usá el botón **ZIP del mes** para bajarte los videos.
 Música instrumental: en el panel, sección 🎵, elegí un ambiente y tocá **Recomendar instrumentales**; escuchá y guardá en `musica/`. Luego generá clips con **Mis pistas**.
+Subtítulos: estilo karaoke (blanco con contorno grueso y relleno amarillo que avanza). Usan la fuente Montserrat ExtraBold: sudo apt-get install -y fonts-montserrat. Altura: --pos-sub (0.74 por defecto).
