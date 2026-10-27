@@ -1,0 +1,21 @@
+{
+  "name": "Clips de predicas",
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
+  "postCreateCommand": "sudo apt-get update; sudo apt-get install -y ffmpeg fonts-liberation && pip install -r requirements.txt",
+  "containerEnv": {
+    "WHISPER_DEVICE": "cpu",
+    "GRADIO_SERVER_NAME": "0.0.0.0"
+  },
+  "forwardPorts": [7860],
+  "portsAttributes": {
+    "7860": { "label": "Panel de clips", "onAutoForward": "openBrowser" }
+  },
+  "secrets": {
+    "GEMINI_API_KEY": { "description": "Clave de Gemini (gratis en https://aistudio.google.com/apikey)" },
+    "FB_PAGE_ID": { "description": "ID de tu página de Facebook (opcional)" },
+    "FB_PAGE_TOKEN": { "description": "Token de tu página de Facebook (opcional)" },
+    "IG_USER_ID": { "description": "ID de tu Instagram profesional (opcional)" },
+    "TIKTOK_ACCESS_TOKEN": { "description": "Token de TikTok (opcional)" }
+  },
+  "customizations": { "vscode": { "extensions": ["ms-python.python"] } }
+}
