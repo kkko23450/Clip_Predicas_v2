@@ -1,0 +1,10 @@
+google-genai
+faster-whisper
+numpy
+opencv-python-headless
+gradio
+requests
+google-api-python-client
+google-auth-oauthlib
+gdown
+yt-dlp

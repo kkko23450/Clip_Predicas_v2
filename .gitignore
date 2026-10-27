@@ -1,0 +1,21 @@
+# Videos, audios y archivos generados (pesan mucho: NO subirlos a GitHub)
+*.mp4
+*.mov
+*.mkv
+*.wav
+*.mp3
+*.zip
+clips*/
+musica/
+publicacion/
+*.words.json
+*.segments.json
+*.transcript.txt
+panel_estado.json
+_descarga/
+_subidos/
+# Claves y permisos: NUNCA subirlos
+youtube_token.json
+client_secret*.json
+.env
+__pycache__/
