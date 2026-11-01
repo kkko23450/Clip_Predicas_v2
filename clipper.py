@@ -559,6 +559,7 @@ def cmd_render(args):
 
     out_dir = Path(args.out).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "origen.txt").write_text(str(video), encoding="utf-8")   # el panel lo usa para sacar portadas después
     zoom = g("zoom", 1.35)
     music_vol = g("music_vol", 0.2)
     sfx_vol = g("sfx_vol", 0.35)
@@ -663,6 +664,14 @@ def cmd_render(args):
         if arc_path:
             arc_path.unlink(missing_ok=True)
 
+        if not g("sin_portadas", False):   # mejor captura del video + prompts de portada (vertical y horizontal)
+            try:
+                import portadas
+                r = portadas.generar_portada(video, clip, out_dir, name)
+                print(f"  Portada: captura del segundo {r['segundo']:.1f} · texto \"{r['texto']}\"")
+            except Exception as e:
+                print(f"  (No pude armar la portada: {e})")
+
         rows.append({"archivo": f"{name}.mp4", "titulo": clip.get("title", ""),
                      "descripcion": clip.get("description", ""), "hashtags": clip.get("hashtags", "")})
 
@@ -694,6 +703,8 @@ def add_render_options(r):
     r.add_argument("--sin-sfx", action="store_true", dest="sin_sfx", help="sin efectos de sonido")
     r.add_argument("--sin-destello", action="store_true", dest="sin_destello", help="sin destello en los cortes")
     r.add_argument("--sin-barra", action="store_true", dest="sin_barra", help="sin barra de progreso")
+    r.add_argument("--sin-portadas", action="store_true", dest="sin_portadas",
+                   help="no sacar la captura ni armar los prompts de portada")
     r.add_argument("--out", default="clips")
 
 

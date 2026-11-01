@@ -44,6 +44,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import redes  # noqa: E402  (publicar por API y buscar música)
+import portadas  # noqa: E402  (mejor captura + prompts de portada)
 
 PLATAFORMAS = ["YouTube", "TikTok", "Instagram", "Facebook"]
 ENLACES = {
@@ -74,6 +75,7 @@ def textos_iniciales(clip):
         "tt": base,
         "ig": base,
         "fb": desc,
+        "portada": portadas.texto_portada(clip),
     }
 
 
@@ -174,6 +176,8 @@ def zip_mes(mes):
             for p in sorted(it["ruta"].glob("*.mp4")):
                 z.write(p, f"{it['ruta'].name}/{p.name}")
                 n += 1
+            for p in sorted((it["ruta"] / "portadas").glob("*")) if (it["ruta"] / "portadas").exists() else []:
+                z.write(p, f"{it['ruta'].name}/portadas/{p.name}")
             for extra in ("clips.json", "publicar.csv", "panel_estado.json"):
                 if (it["ruta"] / extra).exists():
                     z.write(it["ruta"] / extra, f"{it['ruta'].name}/{extra}")
@@ -298,6 +302,56 @@ def generar_textos(nombre, extra=""):
 
 
 # ------------------------------------------------------------------ paquete manual
+def portada_archivos(nombre):
+    """Rutas de la captura y los dos prompts de un clip (pueden no existir todavía)."""
+    base = CARPETA / "portadas" / Path(nombre).stem
+    return (base.with_suffix(".png"), Path(f"{base}_prompt_vertical.txt"), Path(f"{base}_prompt_horizontal.txt"))
+
+
+def portada_datos(nombre):
+    """(ruta de la captura o None, prompt vertical, prompt horizontal) para mostrar en la tarjeta."""
+    png, pv, ph = portada_archivos(nombre)
+    leer = lambda f: f.read_text(encoding="utf-8") if f.exists() else ""
+    return (str(png) if png.exists() else None), leer(pv), leer(ph)
+
+
+def portada_actualizar(nombre, texto):
+    """Reescribe los dos prompts con el texto de portada que editaste."""
+    texto = (texto or "").strip() or portadas.texto_portada(ESTADO[nombre]["clip"])
+    guardar(nombre, "portada", texto.upper())
+    pv, ph = portadas.armar_prompts(ESTADO[nombre]["clip"], texto)
+    _, fv, fh = portada_archivos(nombre)
+    fv.parent.mkdir(parents=True, exist_ok=True)
+    fv.write_text(pv, encoding="utf-8")
+    fh.write_text(ph, encoding="utf-8")
+    return texto.upper(), pv, ph
+
+
+def video_origen():
+    """Video original (largo) del lote abierto: origen.txt, o el único archivo de _descarga/."""
+    f = CARPETA / "origen.txt"
+    if f.exists():
+        v = Path(f.read_text(encoding="utf-8").strip())
+        if v.exists():
+            return v
+    cand = [x for x in (CARPETA / "_descarga").glob("origen_*.*")
+            if x.suffix.lower() in (".mp4", ".mkv", ".webm", ".mov", ".m4v")] if (CARPETA / "_descarga").exists() else []
+    return cand[0] if len(cand) == 1 else None
+
+
+def generar_portadas_lote():
+    """Saca la captura y arma los prompts de los clips que todavía no los tienen (útil en lotes viejos)."""
+    if not ESTADO:
+        return "Abrí primero un lote con clips."
+    video = video_origen()
+    if not video:
+        return ("No encuentro el video original de este lote. Corré en la terminal:\n"
+                f"`python portadas.py RUTA_DEL_VIDEO \"{CARPETA / 'clips.json'}\"`")
+    clips = json.loads((CARPETA / "clips.json").read_text(encoding="utf-8"))
+    n = portadas.generar_lote(video, clips, CARPETA, solo_faltantes=True)
+    return f"✅ {n} portada(s) nueva(s). Abrí **🖼️ Portada** en cada clip para verlas."
+
+
 def preparar_paquete():
     elegidos = [(n, it) for n, it in ESTADO.items() if it["sel"] and it["plat"]]
     if not elegidos:
@@ -311,6 +365,12 @@ def preparar_paquete():
         d = raiz / Path(nombre).stem
         d.mkdir()
         shutil.copy2(CARPETA / nombre, d / "video.mp4")
+        png, pv, ph = portada_archivos(nombre)
+        if png.exists():
+            shutil.copy2(png, d / "portada_captura.png")
+            for f, destino in ((pv, "portada_prompt_vertical.txt"), (ph, "portada_prompt_horizontal.txt")):
+                if f.exists():
+                    shutil.copy2(f, d / destino)
         textos = {
             "YouTube": f"TÍTULO:\n{it['yt_titulo']}\n\nDESCRIPCIÓN:\n{it['yt_desc']}\n",
             "TikTok": it["tt"], "Instagram": it["ig"], "Facebook": it["fb"],
@@ -719,6 +779,7 @@ def construir_app():
         with gr.Row():
             btn_todos = gr.Button("Elegir todos", size="sm")
             btn_ninguno = gr.Button("Quitar selección", size="sm")
+            btn_portadas = gr.Button("🖼️ Generar portadas que falten", size="sm")
         aviso_global = gr.Markdown()
 
         @gr.render(inputs=version)
@@ -754,6 +815,7 @@ def construir_app():
             return resumen_sel(), resumen_sel("Se publicará: ")
 
         todos.click(mejorar_elegidos, [extra, version], [aviso_global, version])
+        btn_portadas.click(lambda v: (generar_portadas_lote(), v + 1), version, [aviso_global, version])
         btn_todos.click(lambda v: marcar_todos(True, v), version, [version, contador, resumen_pub])
         btn_ninguno.click(lambda v: marcar_todos(False, v), version, [version, contador, resumen_pub])
 
@@ -837,6 +899,16 @@ def construir_app():
     return demo
 
 
+def _copiable(gr):
+    """Botón de copiar en los cuadros de texto, según la versión de gradio instalada."""
+    params = inspect.signature(gr.Textbox.__init__).parameters
+    if "show_copy_button" in params:
+        return {"show_copy_button": True}
+    if "buttons" in params:
+        return {"buttons": ["copy"]}
+    return {}
+
+
 def construir_tarjeta(gr, nombre, extra, resumenes):
     it = ESTADO[nombre]
     clip = it["clip"]
@@ -856,6 +928,22 @@ def construir_tarjeta(gr, nombre, extra, resumenes):
                     fb = gr.Textbox(label="Facebook · texto", value=it["fb"], lines=2)
                 btn = gr.Button("✨ Mejorar este clip con Gemini")
                 msg = gr.Markdown()
+        with gr.Accordion("🖼️ Portada: captura + prompts para ChatGPT", open=False):
+            png, pv, ph = portada_datos(nombre)
+            if not png:
+                gr.Markdown("Este clip todavía no tiene portada. Usá **Generar portadas que falten** arriba.")
+            with gr.Row():
+                with gr.Column(scale=2):
+                    gr.Image(value=png, label="Mejor captura (bajala y pasásela a ChatGPT)",
+                             interactive=False, height=300)
+                with gr.Column(scale=3):
+                    p_texto = gr.Textbox(label="Texto de la portada (2 a 5 palabras)", value=it["portada"], max_lines=1)
+                    p_btn = gr.Button("🔄 Actualizar prompts con este texto", size="sm")
+            with gr.Row():
+                p_v = gr.Textbox(label="Prompt VERTICAL 9:16 (TikTok / Reels / Shorts)", value=pv, lines=8,
+                                 interactive=False, **_copiable(gr))
+                p_h = gr.Textbox(label="Prompt HORIZONTAL 16:9 (YouTube / Facebook)", value=ph, lines=8,
+                                 interactive=False, **_copiable(gr))
 
     def _resumen(campo, v):
         guardar(nombre, campo, v)
@@ -874,6 +962,7 @@ def construir_tarjeta(gr, nombre, extra, resumenes):
             return it["yt_titulo"], it["yt_desc"], it["tt"], it["ig"], it["fb"], f"❌ {e}"
 
     btn.click(mejorar, extra, [yt_t, yt_d, tt, ig, fb, msg])
+    p_btn.click(lambda t: portada_actualizar(nombre, t), p_texto, [p_texto, p_v, p_h])
 
 
 def main():

@@ -45,6 +45,11 @@
 - No dar consejos médicos ni psicológicos como reemplazo de un profesional.
 - Si el tema es depresión, suicidio o abuso, solo incluir el clip si es cuidadoso, y sugerir buscar ayuda profesional en la descripción.
 
+## Texto de portada
+- Entre 2 y 5 palabras. Se tiene que leer de un vistazo, incluso chiquito en el celular.
+- Una pregunta que toque el corazón o una frase que despierte curiosidad (ej: "¿Dios se olvidó de vos?", "No llega tarde", "Esto cambia tu oración").
+- Tiene que salir de lo que el predicador dice y el clip debe cumplirlo: sin clickbait.
+
 ## Descripción y hashtags
 - Descripción: 1 a 2 frases que inviten a ver, más un cierre con invitación (ej: "Compartilo con alguien que lo necesite", "Comentá AMÉN").
 - Hashtags: 5 a 8, mezclando amplios (#fe #dios #jesus), de nicho (#predicacioncristiana #palabradedios) y del tema (#esperanza #ansiedad).

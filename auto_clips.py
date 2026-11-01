@@ -52,6 +52,7 @@ Respondé ÚNICAMENTE con un arreglo JSON válido, sin texto antes ni después y
   "end": <segundos de fin, número>,
   "hook": "<texto de gancho, máx 12 palabras>",
   "title": "<título corto>",
+  "portada": "<texto de la portada: 2 a 5 palabras, que despierte curiosidad o toque una emoción, sale de lo que el predicador dice en el clip y el clip lo cumple. Sin clickbait>",
   "description": "<1 a 2 frases + invitación final>",
   "hashtags": "<5 a 8 hashtags separados por espacio>",
   "score": <1 a 10, potencial de impacto>,
