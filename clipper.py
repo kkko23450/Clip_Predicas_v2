@@ -443,12 +443,66 @@ def make_sfx(path, dur, cut_times, boom_times, sr=44100, crash_times=()):
 
 
 # ---------- video: recorte, zoom y efectos ----------
-def base_graph(mode):
+# ---------- silencios y pausas ----------
+# nivel -> (pausa mínima que se considera "larga", cuánto se deja de esa pausa). Segundos.
+SILENCIOS = {"no": None, "suave": (0.9, 0.45), "normal": (0.6, 0.30), "fuerte": (0.4, 0.20)}
+
+
+def plan_pausas(clip_words, start, dur, umbral, dejar):
+    """Calcula qué tramos del clip se quitan, usando los tiempos de cada palabra (no analiza el audio, es instantáneo).
+    Devuelve (tramos_a_conservar, duración_nueva); tramos en segundos relativos al inicio del clip.
+    Cada pausa más larga que `umbral` se acorta a `dejar` segundos."""
+    if not clip_words:
+        return [(0.0, dur)], dur
+    cortes = []                                   # tramos a quitar (a, b), relativos al clip
+    primera = clip_words[0]["s"] - start
+    if primera > 0.5:                             # silencio antes de la primera palabra
+        cortes.append((0.0, primera - 0.25))
+    for prev, nxt in zip(clip_words, clip_words[1:]):
+        hueco = nxt["s"] - prev["e"]
+        if hueco > umbral:                        # deja un margen a cada lado para no pisar las palabras
+            cortes.append((prev["e"] - start + dejar / 2, nxt["s"] - start - dejar / 2))
+    ultima = clip_words[-1]["e"] - start
+    if dur - ultima > 0.9:                        # silencio al final
+        cortes.append((ultima + 0.5, dur))
+    cortes = [(max(a, 0.0), min(b, dur)) for a, b in cortes if b - a > 0.05]
+    quitado = sum(b - a for a, b in cortes)
+    if quitado < 0.3 or dur - quitado < 8:        # nada que valga la pena, o quedaría demasiado corto
+        return [(0.0, dur)], dur
+    tramos, t = [], 0.0
+    for a, b in cortes:
+        if a > t:
+            tramos.append((t, a))
+        t = max(t, b)
+    if t < dur:
+        tramos.append((t, dur))
+    return tramos, sum(b - a for a, b in tramos)
+
+
+def remap_tiempo(t, tramos):
+    """Pasa un segundo del clip original al clip ya sin pausas."""
+    acum = 0.0
+    for a, b in tramos:
+        if t < a:
+            return acum
+        if t <= b:
+            return acum + (t - a)
+        acum += b - a
+    return acum
+
+
+def expr_tramos(tramos):
+    """Expresión de ffmpeg que deja pasar solo los tramos conservados."""
+    return "+".join(f"gte(t,{a:.3f})*lt(t,{b:.3f})" for a, b in tramos)
+
+
+def base_graph(mode, tramos=None):
+    cortar = f",select='{expr_tramos(tramos)}',setpts=N/(30*TB)" if tramos else ""
     if mode == "fit":   # video completo sobre fondo desenfocado
-        return ("[0:v]fps=30,split[a][b];"
+        return (f"[0:v]fps=30{cortar},split[a][b];"
                 "[a]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=25:5[bg];"
                 "[b]scale=1080:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2[base]")
-    return "[0:v]fps=30,scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[base]"
+    return f"[0:v]fps=30{cortar},scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[base]"
 
 
 def detect_focus(video, start, dur, mode, tmp_dir):
@@ -514,10 +568,14 @@ VOICE_CHAIN = (
 FMT = "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo"
 
 
-def audio_graph(dur, music_idx, sfx_idx, music_vol, sfx_vol, duck_ratio=8):
+def audio_graph(dur, music_idx, sfx_idx, music_vol, sfx_vol, duck_ratio=8, tramos=None):
     fade_out = f"afade=t=out:st={max(dur - 0.6, 0):.2f}:d=0.6"
     master = "loudnorm=I=-13:TP=-1.5:LRA=9"
-    parts = [f"[0:a]{FMT},{VOICE_CHAIN}[va]"]
+    if tramos:   # quitar pausas: cuadros de 10 ms para cortar con precisión
+        corte = f"aresample=48000,asetnsamples=n=480:p=0,aselect='{expr_tramos(tramos)}',asetpts=N/SR/TB,"
+    else:
+        corte = ""
+    parts = [f"[0:a]{corte}{FMT},{VOICE_CHAIN}[va]"]
     if music_idx is not None:
         parts += [
             "[va]asplit=2[vo][sc]",
@@ -575,16 +633,33 @@ def cmd_render(args):
 
     for n, clip in enumerate(clips, 1):
         start, end = ts(clip["start"]), ts(clip["end"])
-        dur = end - start
+        dur_in = end - start                       # duración del tramo original
         name = f"{n:02d}_{slug(clip.get('title', 'clip'))}"
         cta = clip.get("cta", cta_default)
+
+        # ---- quitar silencios y pausas largas (usa los tiempos de las palabras: no agrega demora) ----
+        clip_words = [w for w in words if w["s"] >= start - 0.05 and w["e"] <= end + 0.3]
+        nivel = SILENCIOS.get(str(g("silencios", "normal")).lower(), SILENCIOS["normal"])
+        if nivel and g("pausa_umbral") is not None:
+            nivel = (float(g("pausa_umbral")), nivel[1])
+        if nivel and g("pausa_dejar") is not None:
+            nivel = (nivel[0], float(g("pausa_dejar")))
+        tramos, dur = plan_pausas(clip_words, start, dur_in, *nivel) if nivel else ([(0.0, dur_in)], dur_in)
+        if dur < dur_in - 0.05:
+            print(f"  Pausas: quito {dur_in - dur:.1f} s ({dur_in:.0f} s -> {dur:.0f} s)")
+            tramos_ff = tramos
+            words_ass = [{**w, "s": remap_tiempo(w["s"] - start, tramos), "e": remap_tiempo(w["e"] - start, tramos)}
+                         for w in clip_words]
+            ass_start, ass_end = 0.0, dur
+        else:
+            tramos_ff, words_ass, ass_start, ass_end = None, words, start, end
         (out_dir / f"{name}.ass").write_text(
-            build_ass(words, start, end, clip.get("hook", ""), cta, dur, sub_y), encoding="utf-8")
+            build_ass(words_ass, ass_start, ass_end, clip.get("hook", ""), cta, dur, sub_y), encoding="utf-8")
 
         # foco del zoom: manual > detección automática > centro-arriba
         focus = manual_focus
         if zoom > 1.0 and not focus:
-            focus = detect_focus(video, start, dur, args.mode, out_dir)
+            focus = detect_focus(video, start, dur_in, args.mode, out_dir)
             print(f"  Cara detectada en x={focus[0]:.2f} y={focus[1]:.2f}" if focus else
                   "  No detecté la cara: zoom suave centrado (podés indicarla con --foco 0.55,0.25)")
         fx, fy = focus or (0.5, 0.30)
@@ -593,7 +668,9 @@ def cmd_render(args):
         # ---- entradas extra de ffmpeg (música, efectos, logo) ----
         extra, idx = [], 1
         spec = g("music")
-        climax = resolve_climax(clip, start, dur)
+        climax = resolve_climax(clip, start, dur_in)
+        if tramos_ff:                              # el clímax también se corre al sacar las pausas
+            climax = min(remap_tiempo(climax, tramos), max(dur - 3, 0.5 * dur))
         music, music_ss, duck, vol_mult = None, 0.0, 8, 1.0
         arc_path = None
         if spec == "arco":   # música generada: tensión que sube, golpe en el clímax, liberación
@@ -634,7 +711,7 @@ def cmd_render(args):
         # ---- video ----
         flash = ("" if zoom <= 1.0 or g("sin_destello", False) else
                  ",eq=brightness=0.30:enable='gt(t,0.2)*lt(mod(t,3.5),0.1)'")   # destello en cada corte
-        parts = [base_graph(args.mode), zoom_graph(zoom_clip, fx, fy),
+        parts = [base_graph(args.mode, tramos_ff), zoom_graph(zoom_clip, fx, fy),
                  f"[zoomed]{grade_filter(estilo)}{flash},unsharp=5:5:0.6[g]"]
         if not g("sin_barra", False):   # barra de progreso (ayuda a retener)
             parts += [f"color=c=0xFF9A1F:s=1080x10:r=30:d={dur:.2f}[bar]",
@@ -646,10 +723,10 @@ def cmd_render(args):
                       "[b0][lg]overlay=W-w-60:150[b1]"]
         else:
             parts += ["[b0]null[b1]"]
-        parts += [f"[b1]ass={name}.ass[v]", audio_graph(dur, music_idx, sfx_idx, music_vol * vol_mult, sfx_vol, duck)]
+        parts += [f"[b1]ass={name}.ass[v]", audio_graph(dur, music_idx, sfx_idx, music_vol * vol_mult, sfx_vol, duck, tramos_ff)]
 
         cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-stats",
-               "-ss", str(start), "-t", str(dur), "-i", str(video)] + extra
+               "-ss", str(start), "-t", str(dur_in), "-i", str(video)] + extra
         cmd += [
             "-filter_complex", ";".join(parts),
             "-map", "[v]", "-map", "[a]", "-t", f"{dur:.2f}",
@@ -703,6 +780,12 @@ def add_render_options(r):
     r.add_argument("--sin-sfx", action="store_true", dest="sin_sfx", help="sin efectos de sonido")
     r.add_argument("--sin-destello", action="store_true", dest="sin_destello", help="sin destello en los cortes")
     r.add_argument("--sin-barra", action="store_true", dest="sin_barra", help="sin barra de progreso")
+    r.add_argument("--silencios", choices=list(SILENCIOS), default="normal",
+                   help="quitar pausas largas: no | suave (>0,9 s) | normal (>0,6 s, recomendado) | fuerte (>0,4 s)")
+    r.add_argument("--pausa-umbral", type=float, dest="pausa_umbral",
+                   help="ajuste fino: pausa mínima (en segundos) para considerarla larga")
+    r.add_argument("--pausa-dejar", type=float, dest="pausa_dejar",
+                   help="ajuste fino: cuántos segundos se dejan de cada pausa larga")
     r.add_argument("--sin-portadas", action="store_true", dest="sin_portadas",
                    help="no sacar la captura ni armar los prompts de portada")
     r.add_argument("--out", default="clips")

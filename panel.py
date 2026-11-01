@@ -467,12 +467,17 @@ def subir_youtube_elegidos(privacidad):
 
 
 # ------------------------------------------------------------------ generar clips desde el panel
+def mapear_silencios(opcion):
+    return {"Normal (recomendado)": "normal", "Suave": "suave", "Fuerte": "fuerte",
+            "No quitar": "no"}.get(opcion, "normal")
+
+
 def mapear_musica(opcion):
     return {"Arco (tensión, golpe y liberación)": "arco", "Ambiental suave": "auto",
             "Mis pistas (carpeta musica/)": "musica/", "Sin música": "no"}.get(opcion, "arco")
 
 
-def generar_lote(link, archivo, n, musica, estilo, modelo, enfoque, v):
+def generar_lote(link, archivo, n, musica, estilo, modelo, enfoque, silencios, v):
     """Corre auto_clips.py con lo que cargaste y va mostrando el avance. Al terminar abre el lote nuevo."""
     import gradio as gr
     sk = gr.skip
@@ -495,7 +500,8 @@ def generar_lote(link, archivo, n, musica, estilo, modelo, enfoque, v):
     salida = ruta_lote(fuente)                       # clips/AAAA-MM/AAAA-MM-DD_HHMM_nombre
     salida.parent.mkdir(parents=True, exist_ok=True)
     cmd = [sys.executable, "-u", str(SCRIPT_AUTO), fuente, "--clips", str(int(n)), "--estilo", estilo,
-           "--whisper-model", modelo, "--music", mapear_musica(musica), "--out", str(salida)]
+           "--whisper-model", modelo, "--music", mapear_musica(musica),
+           "--silencios", mapear_silencios(silencios), "--out", str(salida)]
     if (enfoque or "").strip():
         cmd += ["--enfoque", enfoque.strip()]
     log = [f"Iniciando... se guardará en {salida.relative_to(BASE)}", "(la transcripción es lo que más tarda)"]
@@ -757,7 +763,11 @@ def construir_app():
                 estilo_dd = gr.Dropdown(["cine", "vivo"], value="cine", label="Estilo visual")
                 modelo = gr.Dropdown(["tiny", "base", "small", "medium"], value="small",
                                      label="Transcripción (más grande = más exacta y más lenta)")
-            enfoque = gr.Textbox(label="Enfoque (opcional)", placeholder="Ej: ansiedad y esperanza")
+            with gr.Row():
+                enfoque = gr.Textbox(label="Enfoque (opcional)", placeholder="Ej: ansiedad y esperanza", scale=3)
+                silencios = gr.Dropdown(["Normal (recomendado)", "Suave", "Fuerte", "No quitar"],
+                                        value="Normal (recomendado)", scale=2,
+                                        label="Quitar silencios y pausas (Suave > 0,9 s · Normal > 0,6 s · Fuerte > 0,4 s)")
             btn_gen = gr.Button("🎬 Generar clips", variant="primary")
             log_box = gr.Textbox(label="Avance", lines=14, max_lines=14, interactive=False, autoscroll=True)
 
@@ -819,7 +829,7 @@ def construir_app():
         btn_todos.click(lambda v: marcar_todos(True, v), version, [version, contador, resumen_pub])
         btn_ninguno.click(lambda v: marcar_todos(False, v), version, [version, contador, resumen_pub])
 
-        btn_gen.click(generar_lote, [link, archivo, n_clips, musica, estilo_dd, modelo, enfoque, version],
+        btn_gen.click(generar_lote, [link, archivo, n_clips, musica, estilo_dd, modelo, enfoque, silencios, version],
                       [log_box, version, lote_dd, mes_dd]).then(refrescar, None, [contador, resumen_pub])
         lote_dd.input(cambiar_lote, [lote_dd, version], version).then(refrescar, None, [contador, resumen_pub])
         mes_dd.input(cambiar_mes, [mes_dd, version], [lote_dd, version]).then(refrescar, None, [contador, resumen_pub])
